@@ -1,0 +1,462 @@
+/*
+ * SPDX-FileCopyrightText: 2023 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: CC0-1.0
+ */
+
+#include "lvgl.h"
+#include <stdio.h>
+
+#include "lv_example_pub.h"
+#include "lv_example_image.h"
+#include "bsp/esp-bsp.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "app_audio.h" // Assuming this handles audio playback
+
+static bool light_2color_layer_enter_cb(void *layer);
+static bool light_2color_layer_exit_cb(void *layer);
+static void light_2color_layer_timer_cb(lv_timer_t *tmr);
+
+typedef enum {
+    LIGHT_CCK_WARM,
+    LIGHT_CCK_COOL,
+    LIGHT_CCK_MAX,
+} LIGHT_CCK_TYPE;
+typedef struct {
+    uint8_t light_pwm;
+    LIGHT_CCK_TYPE light_cck;
+} light_set_attribute_t;
+typedef struct {
+    const lv_img_dsc_t *img_bg[2];
+
+    const lv_img_dsc_t *img_pwm_25[2];
+    const lv_img_dsc_t *img_pwm_50[2];
+    const lv_img_dsc_t *img_pwm_75[2];
+    const lv_img_dsc_t *img_pwm_100[2];
+} ui_light_img_t;
+
+//My code added here.
+typedef enum {
+    ANNOUNCE_LIGHT_ON,
+    ANNOUNCE_LIGHT_OFF,
+    ANNOUNCE_COLOR_WARM,
+    ANNOUNCE_COLOR_COOL,
+    ANNOUNCE_PWM_SET,
+    ANNOUNCE_PWM_100,
+    ANNOUNCE_PWM_75,
+    ANNOUNCE_PWM_50,
+    ANNOUNCE_PWM_25,
+    ANNOUNCE_TIMER_COMPLETE
+} announcement_type_t;
+
+//My code here.
+typedef struct {
+    announcement_type_t type;
+    uint8_t pwm_level; // Relevant for PWM announcements
+} announcement_message_t;
+
+
+
+static lv_obj_t *page;
+//My code here.
+static QueueHandle_t announcement_queue = NULL;
+static time_out_count time_20ms, time_500ms;
+
+static lv_obj_t *img_light_bg, *label_pwm_set;
+static lv_obj_t *img_light_pwm_25, *img_light_pwm_50, *img_light_pwm_75, *img_light_pwm_100, *img_light_pwm_0;
+
+static light_set_attribute_t light_set_conf, light_xor;
+
+static const ui_light_img_t light_image = {
+    {&light_warm_bg,     &light_cool_bg},
+    {&light_warm_25,     &light_cool_25},
+    {&light_warm_50,     &light_cool_50},
+    {&light_warm_75,     &light_cool_75},
+    {&light_warm_100,    &light_cool_100},
+};
+
+lv_layer_t light_2color_Layer = {
+    .lv_obj_name    = "light_2color_Layer",
+    .lv_obj_parent  = NULL,
+    .lv_obj_layer   = NULL,
+    .lv_show_layer  = NULL,
+    .enter_cb       = light_2color_layer_enter_cb,
+    .exit_cb        = light_2color_layer_exit_cb,
+    .timer_cb       = light_2color_layer_timer_cb,
+};
+
+//My code here.
+static void audio_announcement_task(void *pvParameters)
+{
+    announcement_message_t msg;
+    while (1) {
+        if (xQueueReceive(announcement_queue, &msg, portMAX_DELAY) == pdTRUE) {
+            switch (msg.type) {
+                case ANNOUNCE_LIGHT_ON:
+                    audio_handle_info(SOUND_TYPE_LIGHT_ON); // Define appropriate sound types
+                    break;
+                case ANNOUNCE_LIGHT_OFF:
+                    audio_handle_info(SOUND_TYPE_LIGHT_OFF);
+                    break;
+                case ANNOUNCE_COLOR_WARM:
+                    audio_handle_info(SOUND_TYPE_COLOR_WARM);
+                    break;
+                case ANNOUNCE_COLOR_COOL:
+                    audio_handle_info(SOUND_TYPE_COLOR_COOL);
+                    break;
+                case ANNOUNCE_PWM_100:
+                    audio_handle_info(SOUND_TYPE_COLOR_COOL);
+                    break;
+                case ANNOUNCE_PWM_75:
+                    audio_handle_info(SOUND_TYPE_COLOR_COOL);
+                    break;
+                case ANNOUNCE_PWM_50:
+                    audio_handle_info(SOUND_TYPE_COLOR_COOL);
+                    break;
+                case ANNOUNCE_PWM_25:
+                    audio_handle_info(SOUND_TYPE_COLOR_COOL);
+                    break;
+                default:
+                    LV_LOG_WARN("Unknown announcement type");
+                    break;
+            }
+        }
+    }
+}
+
+
+static void light_2color_event_cb(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    announcement_message_t msg;
+
+    if (LV_EVENT_FOCUSED == code) {
+        lv_group_set_editing(lv_group_get_default(), true);
+    } else if (LV_EVENT_KEY == code) {
+        uint32_t key = lv_event_get_key(e);
+        if (is_time_out(&time_500ms)) {
+            if (LV_KEY_RIGHT == key) {
+                if (light_set_conf.light_pwm < 100) {
+                    light_set_conf.light_pwm += 25;
+                    // Send PWM set announcement
+                    msg.type = ANNOUNCE_PWM_SET;
+                    msg.pwm_level = light_set_conf.light_pwm;
+                    xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                }
+            } else if (LV_KEY_LEFT == key) {
+                if (light_set_conf.light_pwm > 0) {
+                    light_set_conf.light_pwm -= 25;
+                    // Send PWM set announcement
+                    msg.type = ANNOUNCE_PWM_SET;
+                    msg.pwm_level = light_set_conf.light_pwm;
+                    xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                }
+            }
+        }
+    } else if (LV_EVENT_CLICKED == code) {
+        // Toggle color temperature
+        light_set_conf.light_cck = (LIGHT_CCK_WARM == light_set_conf.light_cck) ? (LIGHT_CCK_COOL) : (LIGHT_CCK_WARM);
+        
+        // Send color temperature announcement
+        if (light_set_conf.light_cck == LIGHT_CCK_WARM) {
+            msg.type = ANNOUNCE_COLOR_WARM;
+        } else {
+            msg.type = ANNOUNCE_COLOR_COOL;
+        }
+        xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+    } else if (LV_EVENT_LONG_PRESSED == code) {
+        lv_indev_wait_release(lv_indev_get_next(NULL));
+        ui_remove_all_objs_from_encoder_group();
+        lv_func_goto_layer(&menu_layer);
+        //Add timer functionality here.
+    }
+}
+
+// Timer Variables
+static int timer_seconds = 180; // 3 minutes in seconds
+static lv_timer_t *countdown_timer_handle = NULL;
+static int countdown_counter = 0; // Counts the number of timer callbacks
+static bool timer_active = false; // Indicates if the timer is active
+
+// Timer Callback Function
+static void countdown_timer_cb(lv_timer_t *timer)
+{
+    if (timer_seconds > 0) {
+        timer_seconds--;
+        
+        int minutes = timer_seconds / 60;
+        int seconds = timer_seconds % 60;
+        
+        // Update the label with the current time
+        lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", minutes, seconds);
+        
+        if (timer_seconds == 0) {
+            // Timer reached zero, stop the timer
+            lv_timer_del(timer);
+            countdown_timer_handle = NULL;
+            
+            // Optional: Trigger an action when the timer ends
+            // For example, flash LEDs or play a sound
+            // Example: Flash LEDs in red
+            bsp_led_rgb_set(0xFF, 0x00, 0x00); // Red color
+            // Implement a more complex LED flashing pattern if needed
+        }
+    }
+}
+
+
+void ui_light_2color_init(lv_obj_t *parent)
+{
+    light_xor.light_pwm = 0xFF;
+    light_xor.light_cck = LIGHT_CCK_MAX;
+
+    light_set_conf.light_pwm = 50;
+    light_set_conf.light_cck = LIGHT_CCK_WARM;
+
+    page = lv_obj_create(parent);
+    lv_obj_set_size(page, LV_HOR_RES, LV_VER_RES);
+    //lv_obj_set_size(page, lv_obj_get_width(lv_obj_get_parent(page)), lv_obj_set_height(lv_obj_get_parent(page)));
+
+    lv_obj_set_style_border_width(page, 0, 0);
+    lv_obj_set_style_radius(page, 0, 0);
+    lv_obj_clear_flag(page, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_center(page);
+
+    img_light_bg = lv_img_create(page);
+    lv_img_set_src(img_light_bg, &light_warm_bg);
+    lv_obj_align(img_light_bg, LV_ALIGN_CENTER, 0, 0);
+
+    label_pwm_set = lv_label_create(page);
+    lv_obj_set_style_text_font(label_pwm_set, &HelveticaNeue_Regular_24, 0);
+
+    if (light_set_conf.light_pwm) {
+        lv_label_set_text_fmt(label_pwm_set, "%d%%", light_set_conf.light_pwm);
+    } 
+    else {
+        // Initialize the label as a timer starting at 03:00
+        lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", timer_seconds / 60, timer_seconds % 60);
+
+        // Start the countdown timer
+        timer_active = true;
+        countdown_counter = 0;
+    }
+    lv_obj_align(label_pwm_set, LV_ALIGN_CENTER, 0, 65);
+
+    img_light_pwm_0 = lv_img_create(page);
+    lv_img_set_src(img_light_pwm_0, &light_close_status);
+    lv_obj_add_flag(img_light_pwm_0, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_align(img_light_pwm_0, LV_ALIGN_TOP_MID, 0, 0);
+
+    img_light_pwm_25 = lv_img_create(page);
+    lv_img_set_src(img_light_pwm_25, &light_warm_25);
+    lv_obj_align(img_light_pwm_25, LV_ALIGN_TOP_MID, 0, 0);
+
+    img_light_pwm_50 = lv_img_create(page);
+    lv_img_set_src(img_light_pwm_50, &light_warm_50);
+    lv_obj_align(img_light_pwm_50, LV_ALIGN_TOP_MID, 0, 0);
+
+    img_light_pwm_75 = lv_img_create(page);
+    lv_img_set_src(img_light_pwm_75, &light_warm_75);
+    lv_obj_add_flag(img_light_pwm_75, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_align(img_light_pwm_75, LV_ALIGN_TOP_MID, 0, 0);
+
+    img_light_pwm_100 = lv_img_create(page);
+    lv_img_set_src(img_light_pwm_100, &light_warm_100);
+    lv_obj_add_flag(img_light_pwm_100, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_align(img_light_pwm_100, LV_ALIGN_TOP_MID, 0, 0);
+
+    lv_obj_add_event_cb(page, light_2color_event_cb, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(page, light_2color_event_cb, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(page, light_2color_event_cb, LV_EVENT_LONG_PRESSED, NULL);
+    lv_obj_add_event_cb(page, light_2color_event_cb, LV_EVENT_CLICKED, NULL);
+    ui_add_obj_to_encoder_group(page);
+}
+
+
+
+
+static bool light_2color_layer_enter_cb(void *layer)
+{
+    bool ret = false;
+
+    LV_LOG_USER("");
+    lv_layer_t *create_layer = layer;
+    if (NULL == create_layer->lv_obj_layer) {
+        ret = true;
+        create_layer->lv_obj_layer = lv_obj_create(lv_scr_act());
+        lv_obj_remove_style_all(create_layer->lv_obj_layer);
+        lv_obj_set_size(create_layer->lv_obj_layer, LV_HOR_RES, LV_VER_RES);
+
+        ui_light_2color_init(create_layer->lv_obj_layer);
+        set_time_out(&time_20ms, 20);
+        set_time_out(&time_500ms, 200);
+        // Initialize the announcement queue
+        announcement_queue = xQueueCreate(10, sizeof(announcement_message_t));
+        if (announcement_queue == NULL) {
+            LV_LOG_ERROR("Failed to create announcement queue");
+        } else {
+            // Create the audio announcement task
+            xTaskCreate(audio_announcement_task, "AudioAnnouncement", 2048, NULL, 5, NULL);
+        }
+    }
+
+    return ret;
+}
+
+static bool light_2color_layer_exit_cb(void *layer)
+{
+    LV_LOG_USER("");
+    bsp_led_rgb_set(0x00, 0x00, 0x00);
+    // Delete the announcement task and queue if necessary
+    if (announcement_queue != NULL) {
+        vQueueDelete(announcement_queue);
+        announcement_queue = NULL;
+    }
+
+    // Assuming you have a way to delete the task, e.g., storing the task handle
+    // If not, consider adding it during task creation
+    return true;
+}
+
+static void light_2color_layer_timer_cb(lv_timer_t *tmr)
+{
+    uint32_t RGB_color = 0xFF;
+
+    feed_clock_time();
+
+    if (is_time_out(&time_20ms)) {
+
+        // Timer Countdown Logic
+        if (timer_active) {
+            countdown_counter += 1; // Increment the counter each callback
+
+            // Assuming is_time_out(&time_20ms) is called every 20ms
+            // To count 1 second: 1000ms / 20ms = 50 callbacks
+            if (countdown_counter >= 50) { // 50 * 20ms = 1000ms = 1 second
+                countdown_counter = 0; // Reset the counter
+                if (timer_seconds > 0) {
+                    timer_seconds--;
+
+                    int minutes = timer_seconds / 60;
+                    int seconds = timer_seconds % 60;
+
+                    // Update the label with the current time
+                    lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", minutes, seconds);
+
+                    if (timer_seconds == 0) {
+                        // Timer reached zero, stop the timer
+                        timer_active = false;
+
+                        // Trigger an action when the timer ends
+                        // Example: Flash LEDs in red
+                        /*
+                        xTaskCreate([](void *pvParameters) -> void {
+                            for (int i = 0; i < 5; i++) { // Flash 5 times
+                                bsp_led_rgb_set(0xFF, 0x00, 0x00); // Red
+                                vTaskDelay(pdMS_TO_TICKS(500));
+                                bsp_led_rgb_set(0x00, 0x00, 0x00); // Off
+                                vTaskDelay(pdMS_TO_TICKS(500));
+                            }
+                            vTaskDelete(NULL);
+                        }, "LED_Flash_Task", 1024, NULL, 5, NULL);
+
+                        // Play Alarm Sound
+                        audio_handle_info(SOUND_TYPE_ALARM); // Ensure SOUND_TYPE_ALARM is defined
+
+                        // Optionally, send an announcement
+                        announcement_message_t msg;
+                        msg.type = ANNOUNCE_TIMER_COMPLETE;
+                        msg.pwm_level = 0; // Or any relevant value
+                        if (announcement_queue != NULL) {
+                            xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                        }
+                        */
+                    }
+                }
+            }
+        }
+
+        // Existing PWM and CCK Change Handling
+        if ((light_set_conf.light_pwm ^ light_xor.light_pwm) || (light_set_conf.light_cck ^ light_xor.light_cck)) {
+            light_xor.light_pwm = light_set_conf.light_pwm;
+            light_xor.light_cck = light_set_conf.light_cck;
+
+            if (LIGHT_CCK_COOL == light_xor.light_cck) {
+                RGB_color = (0xFF * light_xor.light_pwm / 100) << 16 | 
+                            (0xFF * light_xor.light_pwm / 100) << 8 | 
+                            (0xFF * light_xor.light_pwm / 100) << 0;
+            } else {
+                RGB_color = (0xFF * light_xor.light_pwm / 100) << 16 | 
+                            (0xFF * light_xor.light_pwm / 100) << 8 | 
+                            (0x33 * light_xor.light_pwm / 100) << 0;
+            }
+            bsp_led_rgb_set((RGB_color >> 16) & 0xFF, 
+                           (RGB_color >> 8) & 0xFF, 
+                           (RGB_color >> 0) & 0xFF);
+
+            lv_obj_add_flag(img_light_pwm_100, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(img_light_pwm_75, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(img_light_pwm_50, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(img_light_pwm_25, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(img_light_pwm_0, LV_OBJ_FLAG_HIDDEN);
+
+            if (light_set_conf.light_pwm) {
+                lv_label_set_text_fmt(label_pwm_set, "%d%%", light_set_conf.light_pwm);
+            } else {
+                lv_label_set_text(label_pwm_set, "--");
+
+                // Start the countdown timer when PWM is set to 0
+                if (!timer_active) {
+                    timer_seconds = 180; // Reset to 3 minutes
+                    lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", timer_seconds / 60, timer_seconds % 60);
+                    timer_active = true;
+                    countdown_counter = 0;
+                }
+            }
+
+            uint8_t cck_set = (uint8_t)light_xor.light_cck;
+            announcement_message_t msg;
+
+            switch (light_xor.light_pwm) {
+            case 100:
+                msg.type = ANNOUNCE_PWM_100;
+                msg.pwm_level = light_set_conf.light_pwm;
+                xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                lv_obj_clear_flag(img_light_pwm_100, LV_OBJ_FLAG_HIDDEN);
+                lv_img_set_src(img_light_pwm_100, light_image.img_pwm_100[cck_set]);
+            case 75:
+                msg.type = ANNOUNCE_PWM_75;
+                msg.pwm_level = light_set_conf.light_pwm;
+                xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                lv_obj_clear_flag(img_light_pwm_75, LV_OBJ_FLAG_HIDDEN);
+                lv_img_set_src(img_light_pwm_75, light_image.img_pwm_75[cck_set]);
+            case 50:
+                msg.type = ANNOUNCE_PWM_50;
+                msg.pwm_level = light_set_conf.light_pwm;
+                xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                lv_obj_clear_flag(img_light_pwm_50, LV_OBJ_FLAG_HIDDEN);
+                lv_img_set_src(img_light_pwm_50, light_image.img_pwm_50[cck_set]);
+            case 25:
+                msg.type = ANNOUNCE_PWM_25;
+                msg.pwm_level = light_set_conf.light_pwm;
+                xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                lv_obj_clear_flag(img_light_pwm_25, LV_OBJ_FLAG_HIDDEN);
+                lv_img_set_src(img_light_pwm_25, light_image.img_pwm_25[cck_set]);
+                lv_img_set_src(img_light_bg, light_image.img_bg[cck_set]);
+                break;
+            case 0:
+                msg.type = ANNOUNCE_LIGHT_OFF;
+                msg.pwm_level = light_set_conf.light_pwm;
+                xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                lv_obj_clear_flag(img_light_pwm_0, LV_OBJ_FLAG_HIDDEN);
+                lv_img_set_src(img_light_bg, &light_close_bg);
+                break;
+            default:
+                break;
+            }
+        }
+    }
+}
+
