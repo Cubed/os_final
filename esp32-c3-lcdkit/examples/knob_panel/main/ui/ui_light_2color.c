@@ -29,6 +29,11 @@ static EventGroupHandle_t announcement_event_group;
 #define ANNOUNCE_COLOR_WARM_BIT        (1 << 6)
 #define ANNOUNCE_COLOR_COOL_BIT        (1 << 7)
 
+#define ALL_ANNOUNCEMENT_BITS (ANNOUNCE_PWM_100_BIT | ANNOUNCE_PWM_75_BIT | \
+                                ANNOUNCE_PWM_50_BIT | ANNOUNCE_PWM_25_BIT | \
+                                ANNOUNCE_LIGHT_OFF_BIT | ANNOUNCE_TIMER_COMPLETE_BIT | \
+                                ANNOUNCE_COLOR_WARM_BIT | ANNOUNCE_COLOR_COOL_BIT)
+
 static bool light_2color_layer_enter_cb(void *layer);
 static bool light_2color_layer_exit_cb(void *layer);
 static void light_2color_layer_timer_cb(lv_timer_t *tmr);
