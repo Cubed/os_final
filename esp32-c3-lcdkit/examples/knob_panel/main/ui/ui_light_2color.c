@@ -14,6 +14,20 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "app_audio.h" // Assuming this handles audio playback
+#include "freertos/event_groups.h"
+
+// Define an event group handle
+static EventGroupHandle_t announcement_event_group;
+
+// Define bit masks for each announcement type
+#define ANNOUNCE_PWM_100_BIT    (1 << 0)
+#define ANNOUNCE_PWM_75_BIT     (1 << 1)
+#define ANNOUNCE_PWM_50_BIT     (1 << 2)
+#define ANNOUNCE_PWM_25_BIT     (1 << 3)
+#define ANNOUNCE_LIGHT_OFF_BIT  (1 << 4)
+#define ANNOUNCE_TIMER_COMPLETE_BIT (1 << 5)
+#define ANNOUNCE_COLOR_WARM_BIT        (1 << 6)
+#define ANNOUNCE_COLOR_COOL_BIT        (1 << 7)
 
 static bool light_2color_layer_enter_cb(void *layer);
 static bool light_2color_layer_exit_cb(void *layer);
@@ -90,39 +104,38 @@ lv_layer_t light_2color_Layer = {
 //My code here.
 static void audio_announcement_task(void *pvParameters)
 {
-    announcement_message_t msg;
+    EventBits_t uxBits;
     while (1) {
-        if (xQueueReceive(announcement_queue, &msg, portMAX_DELAY) == pdTRUE) {
-            switch (msg.type) {
-                case ANNOUNCE_LIGHT_ON:
-                    audio_handle_info(SOUND_TYPE_LIGHT_ON); // Define appropriate sound types
-                    break;
-                case ANNOUNCE_LIGHT_OFF:
-                    audio_handle_info(SOUND_TYPE_LIGHT_OFF);
-                    break;
-                case ANNOUNCE_COLOR_WARM:
-                    audio_handle_info(SOUND_TYPE_COLOR_WARM);
-                    break;
-                case ANNOUNCE_COLOR_COOL:
-                    audio_handle_info(SOUND_TYPE_COLOR_COOL);
-                    break;
-                case ANNOUNCE_PWM_100:
-                    audio_handle_info(SOUND_TYPE_COLOR_COOL);
-                    break;
-                case ANNOUNCE_PWM_75:
-                    audio_handle_info(SOUND_TYPE_COLOR_COOL);
-                    break;
-                case ANNOUNCE_PWM_50:
-                    audio_handle_info(SOUND_TYPE_COLOR_COOL);
-                    break;
-                case ANNOUNCE_PWM_25:
-                    audio_handle_info(SOUND_TYPE_COLOR_COOL);
-                    break;
-                default:
-                    LV_LOG_WARN("Unknown announcement type");
-                    break;
-            }
+            uxBits = xEventGroupWaitBits(
+            announcement_event_group,    // The event group being tested.
+            ALL_ANNOUNCEMENT_BITS,      // The bits within the event group to wait for.
+            pdTRUE,                     // Clear the bits before returning.
+            pdFALSE,                    // Wait for any bit, not all bits.
+            portMAX_DELAY               // Wait indefinitely.
+        );
+        if (uxBits & ANNOUNCE_PWM_100_BIT) {
+            audio_handle_info(SOUND_TYPE_LIGHT_100);
         }
+        if (uxBits & ANNOUNCE_PWM_75_BIT) {
+            audio_handle_info(SOUND_TYPE_LIGHT_75);
+        }
+        if (uxBits & ANNOUNCE_PWM_50_BIT) {
+            audio_handle_info(SOUND_TYPE_LIGHT_50);
+        }
+        if (uxBits & ANNOUNCE_PWM_25_BIT) {
+            audio_handle_info(SOUND_TYPE_LIGHT_25);
+        }
+        if (uxBits & ANNOUNCE_LIGHT_OFF_BIT) {
+            audio_handle_info(SOUND_TYPE_LIGHT_OFF);
+        }
+        if (uxBits & ANNOUNCE_COLOR_WARM_BIT) {
+            audio_handle_info(SOUND_TYPE_COLOR_WARM);
+        }
+        if (uxBits & ANNOUNCE_COLOR_COOL_BIT) {
+            audio_handle_info(SOUND_TYPE_COLOR_COOL);
+        }
+        // Add a small delay to prevent tight looping, if necessary
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -292,10 +305,11 @@ static bool light_2color_layer_enter_cb(void *layer)
         ui_light_2color_init(create_layer->lv_obj_layer);
         set_time_out(&time_20ms, 20);
         set_time_out(&time_500ms, 200);
-        // Initialize the announcement queue
-        announcement_queue = xQueueCreate(10, sizeof(announcement_message_t));
-        if (announcement_queue == NULL) {
-            LV_LOG_ERROR("Failed to create announcement queue");
+
+        // Initialize the Event Group
+        announcement_event_group = xEventGroupCreate();
+        if (announcement_event_group == NULL) {
+            LV_LOG_ERROR("Failed to create announcement event group");
         } else {
             // Create the audio announcement task
             xTaskCreate(audio_announcement_task, "AudioAnnouncement", 2048, NULL, 5, NULL);
@@ -305,18 +319,30 @@ static bool light_2color_layer_enter_cb(void *layer)
     return ret;
 }
 
+
 static bool light_2color_layer_exit_cb(void *layer)
 {
     LV_LOG_USER("");
     bsp_led_rgb_set(0x00, 0x00, 0x00);
-    // Delete the announcement task and queue if necessary
-    if (announcement_queue != NULL) {
-        vQueueDelete(announcement_queue);
-        announcement_queue = NULL;
+   // Stop the timer if it's active
+    if (timer_active) {
+        timer_active = false;
+        countdown_counter = 0;
+        timer_seconds = 180; // Reset for next use
+
+        // Optionally, reset the label to display PWM percentage or a default state
+        if (light_set_conf.light_pwm) {
+            lv_label_set_text_fmt(label_pwm_set, "%d%%", light_set_conf.light_pwm);
+        } else {
+            lv_label_set_text(label_pwm_set, "--");
+        }
     }
 
-    // Assuming you have a way to delete the task, e.g., storing the task handle
-    // If not, consider adding it during task creation
+    // Delete the event group
+    if (announcement_event_group != NULL) {
+        vEventGroupDelete(announcement_event_group);
+        announcement_event_group = NULL;
+    }
     return true;
 }
 
@@ -421,35 +447,25 @@ static void light_2color_layer_timer_cb(lv_timer_t *tmr)
 
             switch (light_xor.light_pwm) {
             case 100:
-                msg.type = ANNOUNCE_PWM_100;
-                msg.pwm_level = light_set_conf.light_pwm;
-                xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                xEventGroupSetBits(announcement_event_group, ANNOUNCE_PWM_100_BIT);
                 lv_obj_clear_flag(img_light_pwm_100, LV_OBJ_FLAG_HIDDEN);
                 lv_img_set_src(img_light_pwm_100, light_image.img_pwm_100[cck_set]);
             case 75:
-                msg.type = ANNOUNCE_PWM_75;
-                msg.pwm_level = light_set_conf.light_pwm;
-                xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                xEventGroupSetBits(announcement_event_group, ANNOUNCE_PWM_75_BIT);
                 lv_obj_clear_flag(img_light_pwm_75, LV_OBJ_FLAG_HIDDEN);
                 lv_img_set_src(img_light_pwm_75, light_image.img_pwm_75[cck_set]);
             case 50:
-                msg.type = ANNOUNCE_PWM_50;
-                msg.pwm_level = light_set_conf.light_pwm;
-                xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                xEventGroupSetBits(announcement_event_group, ANNOUNCE_PWM_50_BIT);
                 lv_obj_clear_flag(img_light_pwm_50, LV_OBJ_FLAG_HIDDEN);
                 lv_img_set_src(img_light_pwm_50, light_image.img_pwm_50[cck_set]);
             case 25:
-                msg.type = ANNOUNCE_PWM_25;
-                msg.pwm_level = light_set_conf.light_pwm;
-                xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                xEventGroupSetBits(announcement_event_group, ANNOUNCE_PWM_25_BIT);
                 lv_obj_clear_flag(img_light_pwm_25, LV_OBJ_FLAG_HIDDEN);
                 lv_img_set_src(img_light_pwm_25, light_image.img_pwm_25[cck_set]);
                 lv_img_set_src(img_light_bg, light_image.img_bg[cck_set]);
                 break;
             case 0:
-                msg.type = ANNOUNCE_LIGHT_OFF;
-                msg.pwm_level = light_set_conf.light_pwm;
-                xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                xEventGroupSetBits(announcement_event_group, ANNOUNCE_LIGHT_OFF_BIT);
                 lv_obj_clear_flag(img_light_pwm_0, LV_OBJ_FLAG_HIDDEN);
                 lv_img_set_src(img_light_bg, &light_close_bg);
                 break;
