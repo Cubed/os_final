@@ -70,6 +70,17 @@ typedef enum {
     ANNOUNCE_TIMER_COMPLETE
 } announcement_type_t;
 
+typedef enum {
+    SETTING_COLOR,    // User is selecting the flash color
+    SETTING_TIMER,    // User is setting the timer duration
+    IDLE              // Normal operation
+} setting_state_t;
+
+static setting_state_t current_setting_state = SETTING_COLOR; // Initial state
+static LIGHT_CCK_TYPE selected_color = LIGHT_CCK_WARM;        // Default color
+static int set_timer_minutes = 0;                             // Timer duration in minutes
+
+
 //My code here.
 typedef struct {
     announcement_type_t type;
@@ -152,45 +163,65 @@ static void light_2color_event_cb(lv_event_t *e)
 
     if (LV_EVENT_FOCUSED == code) {
         lv_group_set_editing(lv_group_get_default(), true);
-    } else if (LV_EVENT_KEY == code) {
+    } 
+    else if (LV_EVENT_KEY == code) {
         uint32_t key = lv_event_get_key(e);
         if (is_time_out(&time_500ms)) {
-            if (LV_KEY_RIGHT == key) {
-                if (light_set_conf.light_pwm < 100) {
-                    light_set_conf.light_pwm += 25;
-                    // Send PWM set announcement
-                    msg.type = ANNOUNCE_PWM_SET;
-                    msg.pwm_level = light_set_conf.light_pwm;
-                    xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+            if (current_setting_state == SETTING_COLOR) {
+                // In color selection mode, rotate knob to toggle color
+                if (LV_KEY_RIGHT == key) {
+                    selected_color = (selected_color == LIGHT_CCK_WARM) ? LIGHT_CCK_COOL : LIGHT_CCK_WARM;
+                    // Update the UI to reflect the selected color
+                    lv_img_set_src(img_light_bg, light_image.img_bg[selected_color]);
+                    // Announce the color change
+                    if (selected_color == LIGHT_CCK_WARM) {
+                        msg.type = ANNOUNCE_COLOR_WARM_BIT;
+                    } else {
+                        msg.type = ANNOUNCE_COLOR_COOL_BIT;
+                    }
+                    xEventGroupSetBits(announcement_event_group, msg.type);
                 }
-            } else if (LV_KEY_LEFT == key) {
-                if (light_set_conf.light_pwm > 0) {
-                    light_set_conf.light_pwm -= 25;
-                    // Send PWM set announcement
-                    msg.type = ANNOUNCE_PWM_SET;
-                    msg.pwm_level = light_set_conf.light_pwm;
-                    xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+            } 
+            else if (current_setting_state == SETTING_TIMER) {
+                // In timer setting mode, rotate knob to increment timer
+                if (LV_KEY_RIGHT == key) {
+                    set_timer_minutes += 1;
+                    // Update the UI to reflect the new timer value
+                    lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", set_timer_minutes, 0);
                 }
             }
         }
-    } else if (LV_EVENT_CLICKED == code) {
-        // Toggle color temperature
-        light_set_conf.light_cck = (LIGHT_CCK_WARM == light_set_conf.light_cck) ? (LIGHT_CCK_COOL) : (LIGHT_CCK_WARM);
-        
-        // Send color temperature announcement
-        if (light_set_conf.light_cck == LIGHT_CCK_WARM) {
-            msg.type = ANNOUNCE_COLOR_WARM;
-        } else {
-            msg.type = ANNOUNCE_COLOR_COOL;
+    } 
+    else if (LV_EVENT_CLICKED == code) {
+        if (current_setting_state == SETTING_COLOR) {
+            // Confirm color selection and move to timer setting
+            current_setting_state = SETTING_TIMER;
+            // Optionally, provide visual feedback
+            lv_label_set_text(page_label, "Set Timer: Rotate Knob");
+        } 
+        else if (current_setting_state == SETTING_TIMER) {
+            // Confirm timer setting and start the timer
+            current_setting_state = IDLE;
+            // Start the countdown timer
+            if (set_timer_minutes > 0) {
+                timer_seconds = set_timer_minutes * 60;
+                timer_active = true;
+                countdown_counter = 0;
+                lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", timer_seconds / 60, timer_seconds % 60);
+                // Announce timer set
+                msg.type = ANNOUNCE_TIMER_COMPLETE_BIT; // Or a new bit for timer set
+                xEventGroupSetBits(announcement_event_group, msg.type);
+            }
         }
-        xQueueSend(announcement_queue, &msg, portMAX_DELAY);
-    } else if (LV_EVENT_LONG_PRESSED == code) {
+    } 
+    else if (LV_EVENT_LONG_PRESSED == code) {
         lv_indev_wait_release(lv_indev_get_next(NULL));
         ui_remove_all_objs_from_encoder_group();
         lv_func_goto_layer(&menu_layer);
-        //Add timer functionality here.
+        // Additional actions if needed
     }
 }
+
 
 // Timer Variables
 static int timer_seconds = 180; // 3 minutes in seconds
@@ -223,6 +254,8 @@ static void countdown_timer_cb(lv_timer_t *timer)
         }
     }
 }
+
+static lv_obj_t *page_label; // New label for status messages
 
 
 void ui_light_2color_init(lv_obj_t *parent)
@@ -290,6 +323,11 @@ void ui_light_2color_init(lv_obj_t *parent)
     lv_obj_add_event_cb(page, light_2color_event_cb, LV_EVENT_LONG_PRESSED, NULL);
     lv_obj_add_event_cb(page, light_2color_event_cb, LV_EVENT_CLICKED, NULL);
     ui_add_obj_to_encoder_group(page);
+
+    page_label = lv_label_create(page);
+    lv_obj_set_style_text_font(page_label, &HelveticaNeue_Regular_24, 0);
+    lv_label_set_text(page_label, "Select Color: Press Knob to Confirm");
+    lv_obj_align(page_label, LV_ALIGN_TOP_MID, 0, 10);
 }
 
 
@@ -329,20 +367,20 @@ static bool light_2color_layer_exit_cb(void *layer)
 {
     LV_LOG_USER("");
     bsp_led_rgb_set(0x00, 0x00, 0x00);
-   // Stop the timer if it's active
+
+    // Stop the timer if it's active
     if (timer_active) {
         timer_active = false;
         countdown_counter = 0;
         timer_seconds = 180; // Reset for next use
 
-        // Optionally, reset the label to display PWM percentage or a default state
+        // Reset the label to display PWM percentage or a default state
         if (light_set_conf.light_pwm) {
             lv_label_set_text_fmt(label_pwm_set, "%d%%", light_set_conf.light_pwm);
         } else {
             lv_label_set_text(label_pwm_set, "--");
         }
     }
-
     // Delete the event group
     if (announcement_event_group != NULL) {
         vEventGroupDelete(announcement_event_group);
@@ -351,6 +389,7 @@ static bool light_2color_layer_exit_cb(void *layer)
     return true;
 }
 
+//Handles timer callback and light level call back.
 static void light_2color_layer_timer_cb(lv_timer_t *tmr)
 {
     uint32_t RGB_color = 0xFF;
@@ -381,29 +420,32 @@ static void light_2color_layer_timer_cb(lv_timer_t *tmr)
                         timer_active = false;
 
                         // Trigger an action when the timer ends
-                        // Example: Flash LEDs in red
-                        /*
-                        xTaskCreate([](void *pvParameters) -> void {
-                            for (int i = 0; i < 5; i++) { // Flash 5 times
-                                bsp_led_rgb_set(0xFF, 0x00, 0x00); // Red
-                                vTaskDelay(pdMS_TO_TICKS(500));
-                                bsp_led_rgb_set(0x00, 0x00, 0x00); // Off
-                                vTaskDelay(pdMS_TO_TICKS(500));
-                            }
-                            vTaskDelete(NULL);
-                        }, "LED_Flash_Task", 1024, NULL, 5, NULL);
-
-                        // Play Alarm Sound
-                        audio_handle_info(SOUND_TYPE_ALARM); // Ensure SOUND_TYPE_ALARM is defined
-
-                        // Optionally, send an announcement
-                        announcement_message_t msg;
-                        msg.type = ANNOUNCE_TIMER_COMPLETE;
-                        msg.pwm_level = 0; // Or any relevant value
-                        if (announcement_queue != NULL) {
-                            xQueueSend(announcement_queue, &msg, portMAX_DELAY);
+                        // Flash LEDs in the selected color
+                        if (selected_color == LIGHT_CCK_WARM) {
+                            xTaskCreate([](void *pvParameters) -> void {
+                                for (int i = 0; i < 5; i++) { // Flash 5 times
+                                    bsp_led_rgb_set(0xFF, 0xA5, 0x00); // Orange (Warm)
+                                    vTaskDelay(pdMS_TO_TICKS(500));
+                                    bsp_led_rgb_set(0x00, 0x00, 0x00); // Off
+                                    vTaskDelay(pdMS_TO_TICKS(500));
+                                }
+                                vTaskDelete(NULL);
+                            }, "LED_Flash_Task", 1024, NULL, 5, NULL);
+                        } 
+                        else if (selected_color == LIGHT_CCK_COOL) {
+                            xTaskCreate([](void *pvParameters) -> void {
+                                for (int i = 0; i < 5; i++) { // Flash 5 times
+                                    bsp_led_rgb_set(0x00, 0x00, 0xFF); // Blue (Cool)
+                                    vTaskDelay(pdMS_TO_TICKS(500));
+                                    bsp_led_rgb_set(0x00, 0x00, 0x00); // Off
+                                    vTaskDelay(pdMS_TO_TICKS(500));
+                                }
+                                vTaskDelete(NULL);
+                            }, "LED_Flash_Task", 1024, NULL, 5, NULL);
                         }
-                        */
+
+                        // Play Alarm Sound by setting the timer complete bit
+                        xEventGroupSetBits(announcement_event_group, ANNOUNCE_TIMER_COMPLETE_BIT);
                     }
                 }
             }
