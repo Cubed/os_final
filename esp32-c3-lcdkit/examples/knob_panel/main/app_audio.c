@@ -91,8 +91,9 @@ esp_err_t audio_handle_info(PDM_SOUND_TYPE voice)
     case SOUND_TYPE_LIGHT_25:
         sprintf(filepath, "%s/%s", CONFIG_BSP_SPIFFS_MOUNT_POINT, "factory.mp3");
         break;
+    case SOUND_TYPE_ALARM:
+        sprintf(filepath, "%s/%s", CONFIG_BSP_SPIFFS_MOUNT_POINT, "factory.mp3");
     }
-
     FILE *fp = fopen(filepath, "r");
     ESP_GOTO_ON_FALSE(fp, ESP_FAIL, err, TAG,  "Failed open file:%s", filepath);
 

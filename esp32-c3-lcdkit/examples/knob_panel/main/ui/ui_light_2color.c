@@ -37,7 +37,7 @@ static EventGroupHandle_t announcement_event_group;
 static bool light_2color_layer_enter_cb(void *layer);
 static bool light_2color_layer_exit_cb(void *layer);
 static void light_2color_layer_timer_cb(lv_timer_t *tmr);
-
+static lv_obj_t *page_label; // New label for status messages
 typedef enum {
     LIGHT_CCK_WARM,
     LIGHT_CCK_COOL,
@@ -69,6 +69,12 @@ typedef enum {
     ANNOUNCE_PWM_25,
     ANNOUNCE_TIMER_COMPLETE
 } announcement_type_t;
+
+// Timer Variables
+static int timer_seconds = 180; // 3 minutes in seconds
+static lv_timer_t *countdown_timer_handle = NULL;
+static int countdown_counter = 0; // Counts the number of timer callbacks
+static bool timer_active = false; // Indicates if the timer is active
 
 typedef enum {
     SETTING_COLOR,    // User is selecting the flash color
@@ -116,6 +122,20 @@ lv_layer_t light_2color_Layer = {
     .exit_cb        = light_2color_layer_exit_cb,
     .timer_cb       = light_2color_layer_timer_cb,
 };
+
+
+//My code here.
+void LED_FLASH_TASK(void *pvParameters) 
+{
+    (void) pvParameters; // this is supressing unused param.
+    for (int i = 0; i < 5; i++) {
+        bsp_led_rgb_set(0xFF, 0x00, 0x00); //Flash RED.
+        vTaskDelay(pdMS_TO_TICKS(500)); //Set a delay for half a second.
+        bsp_led_rgb_set(0xFF, 0x00, 0x00); //Flash RED again.
+        vTaskDelay(pdMS_TO_TICKS(500)); //Set a delay for half a second.
+    }
+    vTaskDelete(NULL); //Delete task because we are done.
+}
 
 //My code here.
 static void audio_announcement_task(void *pvParameters)
@@ -222,13 +242,6 @@ static void light_2color_event_cb(lv_event_t *e)
     }
 }
 
-
-// Timer Variables
-static int timer_seconds = 180; // 3 minutes in seconds
-static lv_timer_t *countdown_timer_handle = NULL;
-static int countdown_counter = 0; // Counts the number of timer callbacks
-static bool timer_active = false; // Indicates if the timer is active
-
 // Timer Callback Function
 static void countdown_timer_cb(lv_timer_t *timer)
 {
@@ -254,8 +267,6 @@ static void countdown_timer_cb(lv_timer_t *timer)
         }
     }
 }
-
-static lv_obj_t *page_label; // New label for status messages
 
 
 void ui_light_2color_init(lv_obj_t *parent)
@@ -422,28 +433,13 @@ static void light_2color_layer_timer_cb(lv_timer_t *tmr)
                         // Trigger an action when the timer ends
                         // Flash LEDs in the selected color
                         if (selected_color == LIGHT_CCK_WARM) {
-                            xTaskCreate([](void *pvParameters) -> void {
-                                for (int i = 0; i < 5; i++) { // Flash 5 times
-                                    bsp_led_rgb_set(0xFF, 0xA5, 0x00); // Orange (Warm)
-                                    vTaskDelay(pdMS_TO_TICKS(500));
-                                    bsp_led_rgb_set(0x00, 0x00, 0x00); // Off
-                                    vTaskDelay(pdMS_TO_TICKS(500));
-                                }
-                                vTaskDelete(NULL);
-                            }, "LED_Flash_Task", 1024, NULL, 5, NULL);
+                           //Add task call. AKA a seperate thread init.
+                           xTaskCreate(LED_FLASH_TASK, "LED_FLASH_TASK", 1024, NULL, 5, NULL);
                         } 
                         else if (selected_color == LIGHT_CCK_COOL) {
-                            xTaskCreate([](void *pvParameters) -> void {
-                                for (int i = 0; i < 5; i++) { // Flash 5 times
-                                    bsp_led_rgb_set(0x00, 0x00, 0xFF); // Blue (Cool)
-                                    vTaskDelay(pdMS_TO_TICKS(500));
-                                    bsp_led_rgb_set(0x00, 0x00, 0x00); // Off
-                                    vTaskDelay(pdMS_TO_TICKS(500));
-                                }
-                                vTaskDelete(NULL);
-                            }, "LED_Flash_Task", 1024, NULL, 5, NULL);
+                            //Add task call
+                            xTaskCreate(LED_FLASH_TASK, "LED_FLASH_TASK", 1024, NULL, 5, NULL);
                         }
-
                         // Play Alarm Sound by setting the timer complete bit
                         xEventGroupSetBits(announcement_event_group, ANNOUNCE_TIMER_COMPLETE_BIT);
                     }
