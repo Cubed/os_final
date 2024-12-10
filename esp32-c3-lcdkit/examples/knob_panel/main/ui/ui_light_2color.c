@@ -127,11 +127,12 @@ lv_layer_t light_2color_Layer = {
 //My code here.
 void LED_FLASH_TASK(void *pvParameters) 
 {
+    //There's going to be params here in the future to set the color.
     (void) pvParameters; // this is supressing unused param.
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 500; i++) {
         bsp_led_rgb_set(0xFF, 0x00, 0x00); //Flash RED.
-        vTaskDelay(pdMS_TO_TICKS(500)); //Set a delay for half a second.
-        bsp_led_rgb_set(0xFF, 0x00, 0x00); //Flash RED again.
+        vTaskDelay(pdMS_TO_TICKS(100)); //Set a delay for half a second.
+        bsp_led_rgb_set(0x00, 0xFF, 0x00); //Flash another LED again.
         vTaskDelay(pdMS_TO_TICKS(500)); //Set a delay for half a second.
     }
     vTaskDelete(NULL); //Delete task because we are done.
