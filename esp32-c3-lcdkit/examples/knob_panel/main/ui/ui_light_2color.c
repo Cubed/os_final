@@ -494,14 +494,17 @@ static void light_2color_layer_timer_cb(lv_timer_t *tmr)
                 xEventGroupSetBits(announcement_event_group, ANNOUNCE_PWM_100_BIT);
                 lv_obj_clear_flag(img_light_pwm_100, LV_OBJ_FLAG_HIDDEN);
                 lv_img_set_src(img_light_pwm_100, light_image.img_pwm_100[cck_set]);
+                break;
             case 75:
                 xEventGroupSetBits(announcement_event_group, ANNOUNCE_PWM_75_BIT);
                 lv_obj_clear_flag(img_light_pwm_75, LV_OBJ_FLAG_HIDDEN);
                 lv_img_set_src(img_light_pwm_75, light_image.img_pwm_75[cck_set]);
+                break;
             case 50:
                 xEventGroupSetBits(announcement_event_group, ANNOUNCE_PWM_50_BIT);
                 lv_obj_clear_flag(img_light_pwm_50, LV_OBJ_FLAG_HIDDEN);
                 lv_img_set_src(img_light_pwm_50, light_image.img_pwm_50[cck_set]);
+                break;
             case 25:
                 xEventGroupSetBits(announcement_event_group, ANNOUNCE_PWM_25_BIT);
                 lv_obj_clear_flag(img_light_pwm_25, LV_OBJ_FLAG_HIDDEN);
