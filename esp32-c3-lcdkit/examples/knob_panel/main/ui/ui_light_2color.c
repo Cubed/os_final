@@ -148,7 +148,7 @@ void LED_FLASH_TASK(void *pvParameters)
     vTaskDelete(NULL); // Delete task because we are done.
 }
 
-void AUDIO_ALERT_TASK(void *pvParamaters) 
+void AUDIO_ALERT_TASK(void *pvParameters) 
 {
     (void)pvParameters;
     while (1)
