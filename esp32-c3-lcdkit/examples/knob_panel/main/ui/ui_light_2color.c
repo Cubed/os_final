@@ -138,11 +138,11 @@ void LED_FLASH_TASK(void *pvParameters)
     while (1)
     {
         bsp_led_rgb_set(0xFF, 0x00, 0x00); // Flash RED.
-        vTaskDelay(pdMS_TO_TICKS(10));    // Set a delay for half a second.
-        audio_handle_info(SOUND_TYPE_ALARM);
+        vTaskDelay(pdMS_TO_TICKS(100));    // Set a delay for half a second.
+        //audio_handle_info(SOUND_TYPE_ALARM);
         bsp_led_rgb_set(0x00, 0x00, 0xFF); // Flash another LED again.
-        audio_handle_info(SOUND_TYPE_ALARM);
-        vTaskDelay(pdMS_TO_TICKS(10));    // Set a delay for half a second.
+        //audio_handle_info(SOUND_TYPE_ALARM);
+        vTaskDelay(pdMS_TO_TICKS(100));    // Set a delay for half a second.
     }
     vTaskDelete(NULL); // Delete task because we are done.
 }
