@@ -138,11 +138,10 @@ void LED_FLASH_TASK(void *pvParameters)
     (void)pvParameters; // this is supressing unused param.
     while (1)
     {
+        audio_handle_info(SOUND_TYPE_ALARM);
         bsp_led_rgb_set(0xFF, 0x00, 0x00); // Flash RED.
         vTaskDelay(pdMS_TO_TICKS(100));    // Set a delay for half a second.
-        //audio_handle_info(SOUND_TYPE_ALARM);
         bsp_led_rgb_set(0x00, 0x00, 0xFF); // Flash another LED again.
-        //audio_handle_info(SOUND_TYPE_ALARM);
         vTaskDelay(pdMS_TO_TICKS(100));    // Set a delay for half a second.
     }
     vTaskDelete(NULL); // Delete task because we are done.
@@ -519,14 +518,14 @@ static void light_2color_layer_timer_cb(lv_timer_t *tmr)
                             // Add task call. AKA a seperate thread init.
                             xTaskCreate(LED_FLASH_TASK, "LED_FLASH_TASK", 1024, NULL, 5, &xHandle);
                             //Seperate thread for audio.
-                            xTaskCreate(AUDIO_ALERT_TASK, "AUDIO_ALERT_TASK", 1024, NULL, 5, &xAudioHandle);
+                            xTaskCreate(AUDIO_ALERT_TASK, "AUDIO_ALERT_TASK", 100, NULL, 4, &xAudioHandle);
                         }
                         else if (selected_color == LIGHT_CCK_COOL)
                         {
                             // Add task call
                             xTaskCreate(LED_FLASH_TASK, "LED_FLASH_TASK", 1024, NULL, 5, &xHandle);
                             //Seperate thread for audio.
-                            xTaskCreate(AUDIO_ALERT_TASK, "AUDIO_ALERT_TASK", 1024, NULL, 5, &xAudioHandle);
+                            xTaskCreate(AUDIO_ALERT_TASK, "AUDIO_ALERT_TASK", 100, NULL, 4, &xAudioHandle);
                         }
                         // Play Alarm Sound by setting the timer complete bit
                         xEventGroupSetBits(announcement_event_group, ANNOUNCE_TIMER_COMPLETE_BIT);
