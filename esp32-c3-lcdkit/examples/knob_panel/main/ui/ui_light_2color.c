@@ -188,6 +188,10 @@ static void audio_announcement_task(void *pvParameters)
         {
             audio_handle_info(SOUND_TYPE_COLOR_COOL);
         }
+        if (uxBits & ANNOUNCE_TIMER_COMPLETE_BIT)
+        {
+            audio_handle_info(SOUND_TYPE_ALARM);
+        }
         // Add a small delay to prevent tight looping, if necessary
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -273,8 +277,6 @@ static void light_2color_event_cb(lv_event_t *e)
                 lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", timer_seconds / 60, timer_seconds % 60);
                 lv_label_set_text(page_label, "Timer Started");
                 current_setting_state = TIMER_SET;
-                // Announce timer set (optional)
-                xEventGroupSetBits(announcement_event_group, ANNOUNCE_TIMER_COMPLETE_BIT);
             }
             else {
                 // Provide feedback that the timer must be at least 1 minute
