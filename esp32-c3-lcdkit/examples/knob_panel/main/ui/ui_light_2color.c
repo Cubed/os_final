@@ -303,34 +303,6 @@ static void light_2color_event_cb(lv_event_t *e)
 }
 
 
-// Timer Callback Function
-static void countdown_timer_cb(lv_timer_t *timer)
-{
-    if (timer_seconds > 0)
-    {
-        timer_seconds--;
-
-        int minutes = timer_seconds / 60;
-        int seconds = timer_seconds % 60;
-
-        // Update the label with the current time
-        lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", minutes, seconds);
-
-        if (timer_seconds == 0)
-        {
-            // Timer reached zero, stop the timer
-            lv_timer_del(timer);
-            countdown_timer_handle = NULL;
-
-            // Optional: Trigger an action when the timer ends
-            // For example, flash LEDs or play a sound
-            // Example: Flash LEDs in red
-            bsp_led_rgb_set(0xFF, 0x00, 0x00); // Red color
-            // Implement a more complex LED flashing pattern if needed
-        }
-    }
-}
-
 void ui_light_2color_init(lv_obj_t *parent)
 {
     light_xor.light_pwm = 0xFF;
@@ -500,7 +472,6 @@ static void light_2color_layer_timer_cb(lv_timer_t *tmr)
                     {
                         // Timer reached zero, stop the timer
                         timer_active = false;
-                        msg.type = ANNOUNCE_TIMER_COMPLETE;
                         // Trigger an action when the timer ends
                         // Flash LEDs in the selected color
                         if (selected_color == LIGHT_CCK_WARM)
