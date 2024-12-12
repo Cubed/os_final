@@ -93,6 +93,7 @@ esp_err_t audio_handle_info(PDM_SOUND_TYPE voice)
         break;
     case SOUND_TYPE_ALARM:
         sprintf(filepath, "%s/%s", CONFIG_BSP_SPIFFS_MOUNT_POINT, "alert.mp3");
+        break;
     }
     FILE *fp = fopen(filepath, "r");
     ESP_GOTO_ON_FALSE(fp, ESP_FAIL, err, TAG,  "Failed open file:%s", filepath);

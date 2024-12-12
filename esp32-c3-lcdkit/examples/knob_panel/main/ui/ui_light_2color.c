@@ -60,7 +60,6 @@ typedef struct
 } ui_light_img_t;
 
 TaskHandle_t xHandle = NULL;
-TaskHandle_t xAudioHandle = NULL;
 
 // My code added here.
 typedef enum
@@ -138,7 +137,6 @@ void LED_FLASH_TASK(void *pvParameters)
     (void)pvParameters; // this is supressing unused param.
     while (1)
     {
-        audio_handle_info(SOUND_TYPE_ALARM);
         bsp_led_rgb_set(0xFF, 0x00, 0x00); // Flash RED.
         vTaskDelay(pdMS_TO_TICKS(100));    // Set a delay for half a second.
         bsp_led_rgb_set(0x00, 0x00, 0xFF); // Flash another LED again.
@@ -147,16 +145,7 @@ void LED_FLASH_TASK(void *pvParameters)
     vTaskDelete(NULL); // Delete task because we are done.
 }
 
-void AUDIO_ALERT_TASK(void *pvParameters) 
-{
-    (void)pvParameters;
-    while (1)
-    {
-        audio_handle_info(SOUND_TYPE_ALARM);
-        vTaskDelay(pdMS_TO_TICKS(1000));    // Set a delay for half a second.
-    }
-    vTaskDelete(NULL); // Delete task because we are done.
-}
+
 
 // My code here.
 static void audio_announcement_task(void *pvParameters)
@@ -295,7 +284,6 @@ static void light_2color_event_cb(lv_event_t *e)
         else if (current_setting_state == TIMER_SET) 
         {
             vTaskDelete(xHandle);
-            vTaskDelete(xAudioHandle);
             timer_seconds = 0;
             lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", 0, 0);
             lv_label_set_text(page_label, "Timer Ended");
@@ -510,25 +498,23 @@ static void light_2color_layer_timer_cb(lv_timer_t *tmr)
                     {
                         // Timer reached zero, stop the timer
                         timer_active = false;
-
+                        msg.type = ANNOUNCE_TIMER_COMPLETE;
                         // Trigger an action when the timer ends
                         // Flash LEDs in the selected color
                         if (selected_color == LIGHT_CCK_WARM)
                         {
                             // Add task call. AKA a seperate thread init.
+                            xEventGroupSetBits(announcement_event_group, ANNOUNCE_TIMER_COMPLETE_BIT);
                             xTaskCreate(LED_FLASH_TASK, "LED_FLASH_TASK", 1024, NULL, 5, &xHandle);
-                            //Seperate thread for audio.
-                            xTaskCreate(AUDIO_ALERT_TASK, "AUDIO_ALERT_TASK", 100, NULL, 4, &xAudioHandle);
+                            
                         }
                         else if (selected_color == LIGHT_CCK_COOL)
                         {
                             // Add task call
+                            xEventGroupSetBits(announcement_event_group, ANNOUNCE_TIMER_COMPLETE_BIT);
                             xTaskCreate(LED_FLASH_TASK, "LED_FLASH_TASK", 1024, NULL, 5, &xHandle);
-                            //Seperate thread for audio.
-                            xTaskCreate(AUDIO_ALERT_TASK, "AUDIO_ALERT_TASK", 100, NULL, 4, &xAudioHandle);
                         }
-                        // Play Alarm Sound by setting the timer complete bit
-                        xEventGroupSetBits(announcement_event_group, ANNOUNCE_TIMER_COMPLETE_BIT);
+                        
                     }
                 }
             }
