@@ -13,10 +13,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
-#include "app_audio.h" // Assuming this handles audio playback
+#include "app_audio.h"
 #include "freertos/event_groups.h"
 
-// Define an event group handle
 static EventGroupHandle_t announcement_event_group;
 
 // Define bit masks for each announcement type
@@ -61,7 +60,6 @@ typedef struct
 
 TaskHandle_t xHandle = NULL;
 
-// My code added here.
 typedef enum
 {
     ANNOUNCE_LIGHT_ON,
@@ -95,7 +93,7 @@ static setting_state_t current_setting_state = MODE_NORMAL; // Initial state
 static LIGHT_CCK_TYPE selected_color = LIGHT_CCK_WARM;      // Default color
 static int set_timer_minutes = 0;                           // Timer duration in minutes
 
-// My code here.
+
 typedef struct
 {
     announcement_type_t type;
@@ -103,7 +101,7 @@ typedef struct
 } announcement_message_t;
 
 static lv_obj_t *page;
-// My code here.
+
 static QueueHandle_t announcement_queue = NULL;
 static time_out_count time_20ms, time_500ms;
 
@@ -130,35 +128,34 @@ lv_layer_t light_2color_Layer = {
     .timer_cb = light_2color_layer_timer_cb,
 };
 
-// My code here.
+
 void LED_FLASH_TASK(void *pvParameters)
 {
-    // There's going to be params here in the future to set the color.
     (void)pvParameters; // this is supressing unused param.
     while (1)
     {
-        bsp_led_rgb_set(0xFF, 0x00, 0x00); // Flash RED.
-        vTaskDelay(pdMS_TO_TICKS(100));    // Set a delay for half a second.
-        bsp_led_rgb_set(0x00, 0x00, 0xFF); // Flash another LED again.
-        vTaskDelay(pdMS_TO_TICKS(100));    // Set a delay for half a second.
+        bsp_led_rgb_set(0xFF, 0x00, 0x00); 
+        vTaskDelay(pdMS_TO_TICKS(100));
+        bsp_led_rgb_set(0x00, 0x00, 0xFF);
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
-    vTaskDelete(NULL); // Delete task because we are done.
+    vTaskDelete(NULL);
 }
 
 
 
-// My code here.
+
 static void audio_announcement_task(void *pvParameters)
 {
     EventBits_t uxBits;
     while (1)
     {
         uxBits = xEventGroupWaitBits(
-            announcement_event_group, // The event group being tested.
-            ALL_ANNOUNCEMENT_BITS,    // The bits within the event group to wait for.
-            pdTRUE,                   // Clear the bits before returning.
-            pdFALSE,                  // Wait for any bit, not all bits.
-            portMAX_DELAY             // Wait indefinitely.
+            announcement_event_group,
+            ALL_ANNOUNCEMENT_BITS,    
+            pdTRUE,                  
+            pdFALSE,                  
+            portMAX_DELAY             
         );
         if (uxBits & ANNOUNCE_PWM_100_BIT)
         {
@@ -208,15 +205,14 @@ static void light_2color_event_cb(lv_event_t *e)
     else if (code == LV_EVENT_KEY) {
         uint32_t key = lv_event_get_key(e);
 
-        if (is_time_out(&time_500ms)) { // Ensure actions are only taken at defined intervals
+        if (is_time_out(&time_500ms)) {
             if (current_setting_state == MODE_NORMAL) {
-                // Brightness Control Mode
+                // Brightness Control Mode If branches.
                 if (key == LV_KEY_RIGHT) {
                     if (light_set_conf.light_pwm < 100) {
                         light_set_conf.light_pwm += 25;
                         // Update the UI to reflect the new brightness level
                         lv_label_set_text_fmt(label_pwm_set, "%d%%", light_set_conf.light_pwm);
-                        // Send PWM set announcement
                         msg.type = ANNOUNCE_PWM_SET;
                         msg.pwm_level = light_set_conf.light_pwm;
                         xEventGroupSetBits(announcement_event_group, msg.type);
@@ -225,9 +221,7 @@ static void light_2color_event_cb(lv_event_t *e)
                 else if (key == LV_KEY_LEFT) {
                     if (light_set_conf.light_pwm > 0) {
                         light_set_conf.light_pwm -= 25;
-                        // Update the UI to reflect the new brightness level
                         lv_label_set_text_fmt(label_pwm_set, "%d%%", light_set_conf.light_pwm);
-                        // Send PWM set announcement
                         msg.type = ANNOUNCE_PWM_SET;
                         msg.pwm_level = light_set_conf.light_pwm;
                         xEventGroupSetBits(announcement_event_group, msg.type);
@@ -238,13 +232,11 @@ static void light_2color_event_cb(lv_event_t *e)
                 // Timer Setting Mode
                 if (key == LV_KEY_RIGHT) {
                     set_timer_minutes += 1;
-                    if (set_timer_minutes > 60) { // Set an upper limit for the timer (e.g., 60 minutes)
+                    if (set_timer_minutes > 60) { 
                         set_timer_minutes = 60;
-                        // Optionally, provide feedback that the maximum has been reached
                         lv_label_set_text(page_label, "Max Timer Set");
                     }
                     else {
-                        // Update the UI to reflect the new timer value
                         lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", set_timer_minutes, 0);
                         lv_label_set_text(page_label, "Timer Set: Rotate Knob");
                     }
@@ -252,7 +244,6 @@ static void light_2color_event_cb(lv_event_t *e)
                 else if (key == LV_KEY_LEFT) {
                     if (set_timer_minutes > 1) { // Prevent timer from going below 1 minute
                         set_timer_minutes -= 1;
-                        // Update the UI to reflect the new timer value
                         lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", set_timer_minutes, 0);
                         lv_label_set_text(page_label, "Timer Set: Rotate Knob");
                     }
@@ -262,14 +253,12 @@ static void light_2color_event_cb(lv_event_t *e)
     }
     else if (code == LV_EVENT_CLICKED) {
         if (current_setting_state == MODE_NORMAL) {
-            // Enter Timer Setting Mode
             current_setting_state = SETTING_TIMER;
-            set_timer_minutes = 0; // Reset timer duration
+            set_timer_minutes = 0;
             lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", set_timer_minutes, 0);
             lv_label_set_text(page_label, "Set Timer: Rotate Knob");
         }
         else if (current_setting_state == SETTING_TIMER) {
-            // Confirm and start the timer
             if (set_timer_minutes > 0) {
                 timer_seconds = set_timer_minutes * 60;
                 timer_active = true;
@@ -279,7 +268,7 @@ static void light_2color_event_cb(lv_event_t *e)
                 current_setting_state = TIMER_SET;
             }
             else {
-                // Provide feedback that the timer must be at least 1 minute
+                //Invalid input handling.
                 lv_label_set_text(page_label, "Set Timer: Min 1 Minute");
             }
         }
@@ -293,11 +282,9 @@ static void light_2color_event_cb(lv_event_t *e)
         }
     }
     else if (code == LV_EVENT_LONG_PRESSED) {
-        // Exit to Menu Layer
         lv_indev_wait_release(lv_indev_get_next(NULL));
         ui_remove_all_objs_from_encoder_group();
         lv_func_goto_layer(&menu_layer);
-        // Optionally, reset mode
         current_setting_state = MODE_NORMAL;
     }
 }
@@ -313,7 +300,6 @@ void ui_light_2color_init(lv_obj_t *parent)
 
     page = lv_obj_create(parent);
     lv_obj_set_size(page, LV_HOR_RES, LV_VER_RES);
-    // lv_obj_set_size(page, lv_obj_get_width(lv_obj_get_parent(page)), lv_obj_set_height(lv_obj_get_parent(page)));
 
     lv_obj_set_style_border_width(page, 0, 0);
     lv_obj_set_style_radius(page, 0, 0);
@@ -392,7 +378,6 @@ static bool light_2color_layer_enter_cb(void *layer)
         set_time_out(&time_20ms, 20);
         set_time_out(&time_500ms, 200);
 
-        // Initialize the Event Group
         announcement_event_group = xEventGroupCreate();
         if (announcement_event_group == NULL)
         {
@@ -451,29 +436,23 @@ static void light_2color_layer_timer_cb(lv_timer_t *tmr)
         // Timer Countdown Logic
         if (timer_active)
         {
-            countdown_counter += 1; // Increment the counter each callback
+            countdown_counter += 1; // This increments the counter each callback
 
             // Assuming is_time_out(&time_20ms) is called every 20ms
             // To count 1 second: 1000ms / 20ms = 50 callbacks
             if (countdown_counter >= 50)
-            {                          // 50 * 20ms = 1000ms = 1 second
-                countdown_counter = 0; // Reset the counter
+            {                          // This is because 50 * 20ms = 1000ms = 1 second
                 if (timer_seconds > 0)
                 {
                     timer_seconds--;
 
                     int minutes = timer_seconds / 60;
                     int seconds = timer_seconds % 60;
-
-                    // Update the label with the current time
                     lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", minutes, seconds);
 
                     if (timer_seconds == 0)
                     {
-                        // Timer reached zero, stop the timer
                         timer_active = false;
-                        // Trigger an action when the timer ends
-                        // Flash LEDs in the selected color
                         if (selected_color == LIGHT_CCK_WARM)
                         {
                             // Add task call. AKA a seperate thread init.
@@ -493,7 +472,6 @@ static void light_2color_layer_timer_cb(lv_timer_t *tmr)
             }
         }
 
-        // Existing PWM and CCK Change Handling
         if ((light_set_conf.light_pwm ^ light_xor.light_pwm) || (light_set_conf.light_cck ^ light_xor.light_cck))
         {
             light_xor.light_pwm = light_set_conf.light_pwm;
@@ -528,15 +506,6 @@ static void light_2color_layer_timer_cb(lv_timer_t *tmr)
             else
             {
                 lv_label_set_text(label_pwm_set, "--");
-
-                // Start the countdown timer when PWM is set to 0
-                if (!timer_active)
-                {
-                    //timer_seconds = 180; // Reset to 3 minutes
-                    //lv_label_set_text_fmt(label_pwm_set, "%02d:%02d", timer_seconds / 60, timer_seconds % 60);
-                    //timer_active = true;
-                    //countdown_counter = 0;
-                }
             }
 
             uint8_t cck_set = (uint8_t)light_xor.light_cck;
